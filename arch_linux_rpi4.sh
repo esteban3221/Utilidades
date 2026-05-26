@@ -23,6 +23,11 @@ if [ -z "$1" ]; then
 fi
 
 TARGET_DEV="$1"
+# Validar que el dispositivo realmente exista y sea hardware (block device)
+if [ ! -b "$TARGET_DEV" ]; then
+  echo -e "${ROJO}[!] Error: $TARGET_DEV no existe o no es un dispositivo físico. ¿Se desconectó?${NC}"
+  exit 1
+fi
 
 if [[ "$TARGET_DEV" == *"mmcblk"* ]]; then
     PART_BOOT="${TARGET_DEV}p1"
