@@ -48,8 +48,8 @@ label: dos
 device: ${TARGET_DEV}
 unit: sectors
 
-${TARGET_DEV}1 : start=2048, size=1024000, type=c
-${TARGET_DEV}2 : start=1026048, type=83
+${TARGET_DEV}1 : start=2048, size=2097152, type=c
+${TARGET_DEV}2 : start=2099200, type=83
 EOF
 
 partprobe ${TARGET_DEV}
