@@ -1,0 +1,42 @@
+#!/bin/bash
+
+# Verificar si se ejecuta como root
+if [ "$EUID" -ne 0 ]; then
+  echo "Por favor, ejecuta como root (sudo)"
+  exit 1
+fi
+
+# Detectar el disco y partición raíz
+# Obtenemos el dispositivo que está montado en /
+ROOT_DEV=$(df / | tail -1 | awk '{print $1}')
+ROOT_DISK=${ROOT_DEV%p*} # Ej: /dev/mmcblk0
+PART_NUM=${ROOT_DEV##*p} # Ej: 2
+
+echo "Detectado disco: $ROOT_DISK"
+echo "Detectada partición raíz: $PART_NUM"
+
+# Obtener el sector de inicio de la partición actual
+START_SECTOR=$(fdisk -l $ROOT_DISK | grep "${ROOT_DEV}" | awk '{print $2}')
+
+# Automatizar fdisk usando un "here-document"
+# d (borrar), n (nueva), p (primaria), nº (2), start (valor original), default (todo el disco), no borrar firma, w (escribir)
+fdisk $ROOT_DISK <<EOF
+d
+$PART_NUM
+n
+p
+$PART_NUM
+$START_SECTOR
+
+n
+w
+EOF
+
+# Informar al kernel de los cambios
+partprobe $ROOT_DISK
+
+# Redimensionar el sistema de archivos
+echo "Redimensionando el sistema de archivos..."
+resize2fs $ROOT_DEV
+
+echo "¡Expansión completada con éxito!"
