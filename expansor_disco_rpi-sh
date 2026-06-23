@@ -6,21 +6,38 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-# Detectar el disco y partición raíz
-# Obtenemos el dispositivo que está montado en /
+# 1. Detectar el dispositivo y partición raíz activa
 ROOT_DEV=$(df / | tail -1 | awk '{print $1}')
-ROOT_DISK=${ROOT_DEV%p*} # Ej: /dev/mmcblk0
-PART_NUM=${ROOT_DEV##*p} # Ej: 2
+# Soporta tanto /dev/mmcblk0p2 como /dev/sda2
+if [[ "$ROOT_DEV" == *""pmc""* || "$ROOT_DEV" == *"nvme"* || "$ROOT_DEV" == *"mmcblk"* ]]; then
+  ROOT_DISK=${ROOT_DEV%p*}
+  PART_NUM=${ROOT_DEV##*p}
+else
+  ROOT_DISK=${ROOT_DEV%[0-9]*}
+  PART_NUM=${ROOT_DEV##*[a-z]}
+fi
 
-echo "Detectado disco: $ROOT_DISK"
-echo "Detectada partición raíz: $PART_NUM"
+PART_NAME=$(basename "$ROOT_DEV")
 
-# Obtener el sector de inicio de la partición actual
-START_SECTOR=$(fdisk -l $ROOT_DISK | grep "${ROOT_DEV}" | awk '{print $2}')
+echo "=========================================="
+echo "Disco detectado: $ROOT_DISK"
+echo "Partición raíz:  $PART_NUM"
+echo "=========================================="
 
-# Automatizar fdisk usando un "here-document"
-# d (borrar), n (nueva), p (primaria), nº (2), start (valor original), default (todo el disco), no borrar firma, w (escribir)
-fdisk $ROOT_DISK <<EOF
+# 2. Obtener el sector de inicio real directo desde Sysfs (Evita errores de traducción/columnas)
+if [ -f "/sys/class/block/$PART_NAME/start" ]; then
+  START_SECTOR=$(cat "/sys/class/block/$PART_NAME/start")
+else
+  echo "Error: No se pudo determinar el sector de inicio de la partición."
+  exit 1
+fi
+
+echo "Sector de inicio detectado: $START_SECTOR"
+echo "Redimensionando tabla de particiones..."
+
+# 3. Automatizar fdisk con el nuevo flujo interactivo de Manjaro
+# Flujo: d -> num -> n -> p -> num -> inicio -> fin(default) -> N(no borrar firma) -> w
+fdisk "$ROOT_DISK" <<EOF
 d
 $PART_NUM
 n
@@ -28,15 +45,23 @@ p
 $PART_NUM
 $START_SECTOR
 
-n
+N
 w
 EOF
 
-# Informar al kernel de los cambios
-partprobe $ROOT_DISK
+echo "Informando al kernel sobre la nueva geometría..."
+# Forzar al kernel a leer los cambios de la partición activa
+partprobe "$ROOT_DISK" 2>/dev/null || partx -u "$ROOT_DEV" 2>/dev/null
 
-# Redimensionar el sistema de archivos
-echo "Redimensionando el sistema de archivos..."
-resize2fs $ROOT_DEV
-
-echo "¡Expansión completada con éxito!"
+echo "Redimensionando el sistema de archivos ext4..."
+# Aplicar la expansión en caliente del sistema de archivos
+if resize2fs "$ROOT_DEV"; then
+  echo "=========================================="
+  echo " ¡Expansión completada con éxito! "
+  echo "=========================================="
+else
+  echo "------------------------------------------------------------------"
+  echo "AVISO: El kernel requiere un reinicio para aplicar los cambios."
+  echo "Por favor, ejecuta 'sudo reboot' y el espacio se asignará solo."
+  echo "------------------------------------------------------------------"
+fi
